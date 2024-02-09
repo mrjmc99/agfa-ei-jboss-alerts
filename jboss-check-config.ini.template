@@ -1,0 +1,17 @@
+[Agfa]
+;typical log directory location
+log_dir = C:\\AGFA\\IMPAX_Agility\\logging
+;change to correct FQDN and user (agility user)
+EI_FQDN = 
+EI_USER = 
+EI_PASSWORD = 
+last_processed_event_file = last_processed_event.txt
+
+[Email]
+smtp_server = 
+smtp_port = 25
+smtp_username = 
+smtp_password = None
+smtp_from_domain = 
+;to add multiple receipeints seperate with a comma
+smtp_recipients = 
