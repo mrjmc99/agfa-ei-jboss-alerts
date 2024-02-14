@@ -1,3 +1,5 @@
 *.ini
 /.idea
 last_processed_event.txt
+install.cmd
+upgrade.cmd
