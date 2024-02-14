@@ -1,1 +1,0 @@
-<log4j:message><![CDATA[WFLYSRV0050: JBoss EAP 7.4.9.GA (WildFly Core 15.0.22.Final-redhat-00001) stopped in 10327ms]]></log4j:message>
