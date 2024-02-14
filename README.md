@@ -84,7 +84,7 @@ The script uses a configuration file named **jboss-check-config.ini** for variou
    - ServiceNow Ticket creation
    - Email Alert
  - Clean up old bits of code
- - move cluster check into its own function=
+ - move cluster check into its own function
 
 ## Roadmap
  - Add Windows Bug Check processing
