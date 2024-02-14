@@ -4,8 +4,6 @@ import shutil
 import time
 import smtplib
 import logging
-import zipfile
-
 import requests
 import socket
 import uuid
@@ -51,12 +49,10 @@ smtp_recipients = smtp_recipients_string.split(",")
 #service now variables
 service_now_instance = config.get("ServiceNow", "instance")
 service_now_table = config.get("ServiceNow", "table")
-service_now_task_table = config.get("ServiceNow", "task_table")
 service_now_api_user = config.get("ServiceNow", "api_user")
 service_now_api_password = config.get("ServiceNow", "api_password")
 ticket_type = config.get("ServiceNow", "ticket_type")
 configuration_item = config.get("ServiceNow", "configuration_item")
-catalog_item = config.get("ServiceNow", "catalog_item")
 assignment_group = config.get("ServiceNow", "assignment_group")
 assignee = config.get("ServiceNow", "assignee")
 business_hours_start_time = config.get("ServiceNow", "business_hours_start_time")
@@ -65,10 +61,7 @@ after_hours_urgency = config.get("ServiceNow", "after_hours_urgency")
 after_hours_impact = config.get("ServiceNow", "after_hours_impact")
 business_hours_urgency = config.get("ServiceNow", "business_hours_urgency")
 business_hours_impact = config.get("ServiceNow", "business_hours_impact")
-request_priority = config.get("ServiceNow", "request_priority")
-request_description = config.get("ServiceNow", "request_description")
-request_variables = config.get("ServiceNow", "request_variables")
-reassignment = config.get("ServiceNow", "reassignment")
+
 
 
 # Get the current time and day of the week
