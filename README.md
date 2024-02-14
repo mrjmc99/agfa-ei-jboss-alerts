@@ -10,6 +10,8 @@ The **JBoss Check Script** is a Python script designed to monitor and report the
 
 - **Log File Monitoring**: Monitors JBoss EAP log files for specific events, capturing the newest event and sending email notifications.
 
+- **Jboss Crash Monitoring**: Monitors JBoss EAP folder for Crash Dump Files, if found, a ServiceNow ticket is generated, Email Alert is sent, and Crashdump file moved to a secondary location.
+
 - **Email Notifications**: Sends email notifications with relevant information about the latest JBoss EAP events.
 
 ## Prerequisites
