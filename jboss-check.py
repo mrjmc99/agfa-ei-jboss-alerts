@@ -203,8 +203,7 @@ def process_core_dump(crashdump_file):
     crashdump_log_file_name = os.path.splitext(crashdump_file)[0] + '.log'
     crashdump_log_source_path = os.path.join(log_dir, crashdump_log_file_name)
     destination_path = crashdump_logs_folder
-    destination_directory = os.path.dirname(destination_path)
-    os.makedirs(destination_directory, exist_ok=True)
+    os.makedirs(destination_path, exist_ok=True)
     external_unique_id = str(uuid.uuid4())
     cluster_nodes = None
 
