@@ -6,6 +6,8 @@ EI_FQDN =
 EI_USER = 
 EI_PASSWORD = 
 last_processed_event_file = last_processed_event.txt
+crashdump_logs_folder =
+EI_jboss_path = C:\AGFA\IMPAX_Agility\active\server\jboss\bin
 
 [Email]
 smtp_server = 
@@ -13,5 +15,24 @@ smtp_port = 25
 smtp_username = 
 smtp_password = None
 smtp_from_domain = 
-;to add multiple receipeints seperate with a comma
+;to add multiple recipients separate with a comma
 smtp_recipients = 
+
+[ServiceNow]
+api_user =
+api_password =
+;instance url is unique to each org
+instance =
+;table is unique to each service now instance
+table = incident
+ticket_type = incident
+;service now guids are used for configuration item, assignment group, etc
+configuration_item =
+assignment_group =
+assignee =
+business_hours_start_time = 08:00:00
+business_hours_end_time = 17:00:00
+after_hours_urgency = 4
+after_hours_impact = 4
+business_hours_urgency = 4
+business_hours_impact = 4

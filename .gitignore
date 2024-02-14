@@ -1,1 +1,3 @@
 *.ini
+/.idea
+last_processed_event.txt
