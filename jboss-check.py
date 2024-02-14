@@ -228,7 +228,7 @@ def process_core_dump(crashdump_file):
 
         # setup email variables
         subject = f"JBoss EAP Crashed on {os.environ['COMPUTERNAME']} at {crash_timestamp}"
-        message = f"JBoss EAP Crashed\nTime: {crash_timestamp}\nCluster FQDN: {EI_FQDN}\n"
+        message = f"JBoss EAP Crashed\nTime: {crash_timestamp}\nCrash dump file: {crashdump_file}\nCluster FQDN: {EI_FQDN}\n"
 
         # Check cluster health
         cluster_nodes = call_cluster_api()
