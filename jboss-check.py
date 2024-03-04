@@ -454,30 +454,29 @@ def process_newest_log_file(log_file_path, last_processed_event):
 if __name__ == '__main__':
     last_processed_event = load_last_processed_event(last_processed_event_file)
 
-    while True:
-        try:
-            logging.info('Processing log files...')
-            log_files = sorted(
-                (f for f in os.listdir(log_dir) if f.startswith('server-') and f.endswith('.log')),
-                reverse=True
-            )
-            if log_files:
-                newest_log_file = log_files[0]
-                log_file_path = os.path.join(log_dir, newest_log_file)
-                logging.info(f'Processing the newest log file: {log_file_path}')
-                last_processed_event = process_newest_log_file(log_file_path, last_processed_event)
-                
-                # Save the last_processed_event to the file
-                save_last_processed_event(last_processed_event, last_processed_event_file)
-            crashdump = list(f for f in os.listdir(EI_jboss_path) if f.endswith('.mdmp'))
-            if crashdump:
-                crashdump_file = crashdump[0]
-                logging.info(f'Processing crashdump: {crashdump_file}')
-                process_core_dump(crashdump_file)
+    try:
+        logging.info('Processing log files...')
+        log_files = sorted(
+            (f for f in os.listdir(log_dir) if f.startswith('server-') and f.endswith('.log')),
+            reverse=True
+        )
+        if log_files:
+            newest_log_file = log_files[0]
+            log_file_path = os.path.join(log_dir, newest_log_file)
+            logging.info(f'Processing the newest log file: {log_file_path}')
+            last_processed_event = process_newest_log_file(log_file_path, last_processed_event)
 
-          
-            logging.info('Waiting for next iteration...')
-            time.sleep(30)  # Adjust the interval as needed
+            # Save the last_processed_event to the file
+            save_last_processed_event(last_processed_event, last_processed_event_file)
+        crashdump = list(f for f in os.listdir(EI_jboss_path) if f.endswith('.mdmp'))
+        if crashdump:
+            crashdump_file = crashdump[0]
+            logging.info(f'Processing crashdump: {crashdump_file}')
+            process_core_dump(crashdump_file)
 
-        except Exception as e:
-            logging.error(f"Error in main loop: {e}")
+
+        #logging.info('Waiting for next iteration...')
+        #time.sleep(30)  # Adjust the interval as needed
+
+    except Exception as e:
+        logging.error(f"Error in main loop: {e}")
