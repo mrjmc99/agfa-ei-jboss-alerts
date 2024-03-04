@@ -386,7 +386,7 @@ def create_service_now_incident(summary, description, configuration_item, extern
     return None, None
 
 def process_newest_log_file(log_file_path, last_processed_event):
-    event_pattern = re.compile(r".*?(JBoss EAP.*?(started|stopped)|Stop triggered|Timeout reached after 60s\. Calling halt|Starting JBossWS)")
+    event_pattern = re.compile(r".*?(JBoss EAP.*?(started|stopped)|Timeout reached after 60s\. Calling halt|Starting JBossWS)")
     cluster_nodes = None
     newest_event = None
     newest_event_type = None
