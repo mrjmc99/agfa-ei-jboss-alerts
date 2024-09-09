@@ -394,7 +394,6 @@ def create_service_now_incident(summary, description, configuration_item, extern
 # Process the newest log file
 def process_newest_log_file(log_file_path, last_processed_event):
     logging.info(f"Processing log file: {log_file_path}")
-    cluster_nodes = None
     newest_event = None
     newest_event_type = None
     local_timestamp = None
@@ -410,6 +409,11 @@ def process_newest_log_file(log_file_path, last_processed_event):
                     newest_event = line.strip()
                     newest_event_type = match.group(2) or match.group(1)
                     logging.info(f"Found event: {newest_event}, type: {newest_event_type}")
+
+                    # **Early Exit**: Skip further processing if the event matches the last processed event
+                    if newest_event == last_processed_event:
+                        logging.info("The newest event matches the last processed event. Skipping further processing.")
+                        return last_processed_event
 
                     # Get the previous line for timestamp, ensure it exists
                     if i - 1 >= 0:
@@ -440,10 +444,9 @@ def process_newest_log_file(log_file_path, last_processed_event):
                         continue
 
                     break  # We exit the loop after finding the first event in reverse order
-
-        # If a new event is found and it's different from the last processed event, proceed
         if newest_event and newest_event != last_processed_event:
-            logging.info(f"New event to process: {newest_event}")
+            # Proceed only if a new event is found and different from the last processed event
+            logging.info(f"Processing new event: {newest_event}")
             cluster_nodes = call_cluster_api()
 
             subject = f"JBoss EAP {newest_event_type.capitalize()} on {os.environ['COMPUTERNAME']} at {local_timestamp}"
@@ -458,11 +461,12 @@ def process_newest_log_file(log_file_path, last_processed_event):
             return newest_event
 
     except FileNotFoundError as e:
-        logging.error(f"Log file not found: {log_file_path}. Error: {e}")
+                logging.error(f"Log file not found: {log_file_path}. Error: {e}")
     except Exception as e:
-        logging.error(f"Error processing log file: {e}")
+                logging.error(f"Error processing log file: {e}")
 
     return last_processed_event
+
 
 
 # Use multithreading for concurrent processing
