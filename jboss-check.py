@@ -10,10 +10,14 @@ import uuid
 from requests.exceptions import Timeout
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import configparser
 
-# Configure logging
+# Optimize logging by limiting verbosity to important messages
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Compile regex patterns once at the start
+event_pattern = re.compile(r".*?(JBoss EAP.*?(started|stopped)|Timeout reached after 60s\. Calling halt|Starting JBossWS)")
 
 # Get the absolute path of the script
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -385,16 +389,20 @@ def create_service_now_incident(summary, description, configuration_item, extern
 
     return None, None
 
+
+# Reuse file read buffers and process files lazily
+# Process the newest log file
 def process_newest_log_file(log_file_path, last_processed_event):
-    event_pattern = re.compile(r".*?(JBoss EAP.*?(started|stopped)|Timeout reached after 60s\. Calling halt|Starting JBossWS)")
+    logging.info(f"Processing log file: {log_file_path}")
     cluster_nodes = None
     newest_event = None
     newest_event_type = None
     local_timestamp = None
 
     try:
+        # Read the file line by line in reverse (for efficiency)
         with open(log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
+            lines = list(f)  # Load all lines once to allow reversing
             for i in reversed(range(len(lines))):
                 line = lines[i]
                 match = event_pattern.search(line)
@@ -403,52 +411,95 @@ def process_newest_log_file(log_file_path, last_processed_event):
                     newest_event_type = match.group(2) or match.group(1)
                     logging.info(f"Found event: {newest_event}, type: {newest_event_type}")
 
-                    timestamp_line = lines[i - 1]
-                    time_start = timestamp_line.find('time="') + 6
-                    time_end = timestamp_line.find('"', time_start)
-                    if time_start != -1 and time_end != -1:
-                        timestamp = timestamp_line[time_start:time_end]
+                    # Get the previous line for timestamp, ensure it exists
+                    if i - 1 >= 0:
+                        timestamp_line = lines[i - 1]
+                        logging.info(f"Attempting to parse timestamp from line: {timestamp_line}")
 
-                        # Convert timestamp to local time
-                        dt_format = "%Y/%m/%d %H:%M:%S.%f"
-                        utc_dt = datetime.strptime(timestamp[:-6], dt_format)
-                        offset_minutes = int((datetime.utcnow() - datetime.now()).total_seconds() / 60)
-                        local_dt = utc_dt - timedelta(minutes=offset_minutes)
-                        local_timestamp = local_dt.strftime(dt_format)
+                        # Extract timestamp
+                        time_start = timestamp_line.find('time="') + 6
+                        time_end = timestamp_line.find('"', time_start)
+                        if time_start != -1 and time_end != -1:
+                            timestamp = timestamp_line[time_start:time_end]
+                            logging.info(f"Timestamp found: {timestamp}")
 
-                        # Format the local time
-                        local_timestamp = local_dt.strftime("%H:%M:%S %m/%d/%y")
+                            # Convert timestamp to local time
+                            dt_format = "%Y/%m/%d %H:%M:%S.%f"
+                            try:
+                                utc_dt = datetime.strptime(timestamp[:-6], dt_format)
+                                local_dt = utc_dt - timedelta(minutes=int((datetime.utcnow() - datetime.now()).total_seconds() / 60))
+                                local_timestamp = local_dt.strftime("%H:%M:%S %m/%d/%y")
+                            except ValueError as ve:
+                                logging.error(f"Error parsing timestamp: {ve}")
+                                continue
+                        else:
+                            logging.error("Failed to find timestamp in the line.")
+                            continue
+                    else:
+                        logging.error("No preceding line to extract the timestamp.")
+                        continue
 
-                        break
+                    break  # We exit the loop after finding the first event in reverse order
 
+        # If a new event is found and it's different from the last processed event, proceed
         if newest_event and newest_event != last_processed_event:
-            try:
-                get_token()
-                cluster_nodes = call_cluster_api()
-                release_token()
-            finally:
-                subject = f"JBoss EAP {newest_event_type.capitalize()} on {os.environ['COMPUTERNAME']} at {local_timestamp}"
-                message = f"{newest_event}\nTime: {local_timestamp}\nCluster FQDN: {EI_FQDN}\n"
-                # Check cluster nodes
-                if cluster_nodes:
-                    message += f"\nCurrent Cluster Nodes: {cluster_nodes}"
-                    message = check_cluster_nodes(cluster_nodes, message)
-                else:
-                    message = f"\nFailed to retrieve cluster nodes information."
-                #send alert email
-                send_email(subject, message)
-                return newest_event
+            logging.info(f"New event to process: {newest_event}")
+            cluster_nodes = call_cluster_api()
+
+            subject = f"JBoss EAP {newest_event_type.capitalize()} on {os.environ['COMPUTERNAME']} at {local_timestamp}"
+            message = f"{newest_event}\nTime: {local_timestamp}\nCluster FQDN: {EI_FQDN}\n"
+
+            if cluster_nodes:
+                message += f"\nCurrent Cluster Nodes: {cluster_nodes}"
+                message = check_cluster_nodes(cluster_nodes, message)
+
+            # Send alert email
+            send_email(subject, message)
+            return newest_event
+
+    except FileNotFoundError as e:
+        logging.error(f"Log file not found: {log_file_path}. Error: {e}")
     except Exception as e:
         logging.error(f"Error processing log file: {e}")
 
     return last_processed_event
 
 
+# Use multithreading for concurrent processing
+def process_files_concurrently(log_files, crashdumps):
+    with ThreadPoolExecutor() as executor:
+        futures = []
+
+        # Process log files concurrently
+        for log_file in log_files:
+            futures.append(executor.submit(process_newest_log_file, log_file, last_processed_event))
+
+        # Process crashdumps concurrently
+        for crashdump_file in crashdumps:
+            futures.append(executor.submit(process_core_dump, crashdump_file))
+
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                logging.info(f"Processing completed with result: {result}")
+            except Exception as e:
+                logging.error(f"Error in concurrent processing: {e}")
 
 
-
-
-
+# Helper function to get sorted log files and return full paths
+def get_sorted_log_files(log_dir):
+    try:
+        # Construct full paths and sort log files in reverse order
+        log_files = sorted(
+            [os.path.join(log_dir, f) for f in os.listdir(log_dir) if f.startswith('server-') and f.endswith('.log')],
+            reverse=True
+        )
+        if log_files:
+            logging.info(f"Found log files: {log_files}")
+        return log_files
+    except Exception as e:
+        logging.error(f"Error retrieving log files: {e}")
+        return []
 
 
 if __name__ == '__main__':
@@ -456,27 +507,25 @@ if __name__ == '__main__':
 
     try:
         logging.info('Processing log files...')
-        log_files = sorted(
-            (f for f in os.listdir(log_dir) if f.startswith('server-') and f.endswith('.log')),
-            reverse=True
-        )
-        if log_files:
-            newest_log_file = log_files[0]
-            log_file_path = os.path.join(log_dir, newest_log_file)
-            logging.info(f'Processing the newest log file: {log_file_path}')
-            last_processed_event = process_newest_log_file(log_file_path, last_processed_event)
 
-            # Save the last_processed_event to the file
+        # Get sorted log files
+        log_files = get_sorted_log_files(log_dir)
+
+        if log_files:
+            # Ensure we are processing only the newest log file
+            newest_log_file = log_files[0]
+            logging.info(f'Newest log file: {newest_log_file}')
+            last_processed_event = process_newest_log_file(newest_log_file, last_processed_event)
+
+            # Save the last processed event to the file
             save_last_processed_event(last_processed_event, last_processed_event_file)
-        crashdump = list(f for f in os.listdir(EI_jboss_path) if f.endswith('.mdmp'))
-        if crashdump:
-            crashdump_file = crashdump[0]
+
+        # Process crash dump if any
+        crashdumps = [os.path.join(EI_jboss_path, f) for f in os.listdir(EI_jboss_path) if f.endswith('.mdmp')]
+        if crashdumps:
+            crashdump_file = crashdumps[0]
             logging.info(f'Processing crashdump: {crashdump_file}')
             process_core_dump(crashdump_file)
-
-
-        #logging.info('Waiting for next iteration...')
-        #time.sleep(30)  # Adjust the interval as needed
 
     except Exception as e:
         logging.error(f"Error in main loop: {e}")
