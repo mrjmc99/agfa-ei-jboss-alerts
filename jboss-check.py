@@ -1,3 +1,4 @@
+import mmap
 import os
 import re
 import shutil
@@ -17,7 +18,7 @@ import configparser
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Compile regex patterns once at the start
-event_pattern = re.compile(r".*?(JBoss EAP.*?(started|stopped)|Timeout reached after 60s\. Calling halt|Starting JBossWS)")
+event_pattern = re.compile(r".*?(JBoss EAP.*?(started|stopped)|Timeout reached after 60s\. Calling halt)")
 
 # Get the absolute path of the script
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -390,7 +391,74 @@ def create_service_now_incident(summary, description, configuration_item, extern
     return None, None
 
 
-# Reuse file read buffers and process files lazily
+def quick_search_with_mmap(file_path):
+    """Quickly search for JBoss EAP and specific events using memory-mapped files in reverse order and return the event type and line number."""
+    with open(file_path, 'rb') as f:
+        # Memory-map the file, size 0 means whole file
+        with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as mm:
+            file_size = mm.size()
+            current_pos = file_size  # Start from the end of the file
+            line_number = 0
+            found_event = None
+
+            # Start reading the file backwards
+            while current_pos > 0:
+                # Move the pointer back and read byte by byte
+                current_pos -= 1
+                mm.seek(current_pos)
+                byte = mm.read(1)
+
+                # If we find a newline, process the line
+                if byte == b'\n':
+                    line = mm.readline().decode('utf-8', errors='ignore').strip()
+                    line_number += 1
+
+                    # First, check if "JBoss EAP" is in the line
+                    if "JBoss EAP" in line:
+                        # Check if the line contains "started" or "stopped"
+                        if "started" in line:
+                            logging.info(f"Found 'started' event with 'JBoss EAP' at line {line_number}")
+                            found_event = (line_number, "started")
+                        elif "stopped" in line:
+                            logging.info(f"Found 'stopped' event with 'JBoss EAP' at line {line_number}")
+                            found_event = (line_number, "stopped")
+
+                    # Check separately for "Timeout reached after 60s"
+                    elif "Timeout reached after 60s" in line:
+                        logging.info(f"Found 'timeout' event at line {line_number}")
+                        found_event = (line_number, "timeout")
+
+                    # If an event is found, return the latest (i.e., closest to the end of the file)
+                    if found_event:
+                        return found_event
+
+    return None, None  # Return None if no match is found
+
+def extract_timestamp_from_line(timestamp_line):
+    """Extract timestamp from a given log line."""
+    time_start = timestamp_line.find('time="') + 6
+    time_end = timestamp_line.find('"', time_start)
+    if time_start != -1 and time_end != -1:
+        return timestamp_line[time_start:time_end]
+    else:
+        logging.error("Failed to find timestamp in the line.")
+        return None
+
+
+def convert_to_local_time(utc_timestamp):
+    """Convert a UTC timestamp to local time."""
+    if not utc_timestamp:
+        return None
+
+    dt_format = "%Y/%m/%d %H:%M:%S.%f"
+    try:
+        utc_dt = datetime.strptime(utc_timestamp[:-6], dt_format)
+        local_dt = utc_dt - timedelta(minutes=int((datetime.utcnow() - datetime.now()).total_seconds() / 60))
+        return local_dt.strftime("%H:%M:%S %m/%d/%y")
+    except ValueError as ve:
+        logging.error(f"Error parsing timestamp: {ve}")
+        return None
+
 # Process the newest log file
 def process_newest_log_file(log_file_path, last_processed_event):
     logging.info(f"Processing log file: {log_file_path}")
@@ -468,26 +536,89 @@ def process_newest_log_file(log_file_path, last_processed_event):
     return last_processed_event
 
 
+def process_newest_two_log_files(log_files, last_processed_event):
+    logging.info(f"Processing the newest two log files: {log_files[:2]}")
+    newest_event = None
+    newest_event_type = None
+    local_timestamp = None
 
-# Use multithreading for concurrent processing
-def process_files_concurrently(log_files, crashdumps):
-    with ThreadPoolExecutor() as executor:
-        futures = []
+    # Loop over the two newest log files
+    for log_file in log_files[:2]:
+        logging.info(f"Performing quick event search in log file: {log_file}")
 
-        # Process log files concurrently
-        for log_file in log_files:
-            futures.append(executor.submit(process_newest_log_file, log_file, last_processed_event))
+        # Use mmap to find the event type and match line number
+        match_line_number, event_type = quick_search_with_mmap(log_file)
+        if match_line_number is None:
+            logging.info(f"No event found in {log_file}. Skipping further processing.")
+            continue  # Skip to the next log file if no event exists
 
-        # Process crashdumps concurrently
-        for crashdump_file in crashdumps:
-            futures.append(executor.submit(process_core_dump, crashdump_file))
+        logging.info(f"Event found at line {match_line_number} in {log_file}. Event type: {event_type}")
 
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-                logging.info(f"Processing completed with result: {result}")
-            except Exception as e:
-                logging.error(f"Error in concurrent processing: {e}")
+        try:
+            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = list(f)  # Load all lines into memory
+
+            # If the event is "started", process from the match line
+            if event_type == "started":
+                for i in range(len(lines)):
+                    line = lines[i]
+                    match = event_pattern.search(line)
+                    if match:
+                        newest_event = line.strip()
+                        newest_event_type = match.group(2) or match.group(1)  # Check for "started" or "stopped"
+                        logging.info(f"Found event: {newest_event}, type: {newest_event_type}")
+                        # Get the previous line for timestamp
+                        timestamp_line = lines[i - 1]
+                        timestamp = extract_timestamp_from_line(timestamp_line)
+                        local_timestamp = convert_to_local_time(timestamp)
+                        break
+
+            # If the event is "stopped" or "Timeout reached after 60s", process the file in reverse
+            else:
+                for i in reversed(range(len(lines))):
+                    line = lines[i]
+                    if "JBoss EAP" in line and ("stopped" in line or "Timeout reached after 60s" in line):
+                        newest_event = line.strip()
+                        logging.info(f"Processing '{event_type}' event: {newest_event}")
+
+                        # Get the previous line for timestamp
+                        timestamp_line = lines[i - 1]
+                        timestamp = extract_timestamp_from_line(timestamp_line)
+                        local_timestamp = convert_to_local_time(timestamp)
+                        break
+
+            # If a new event is found, process it and return
+            if newest_event and newest_event != last_processed_event:
+                logging.info(f"Processing new event: {newest_event}")
+                cluster_nodes = call_cluster_api()
+
+                subject = f"JBoss EAP {event_type.capitalize()} on {os.environ['COMPUTERNAME']} at {local_timestamp}"
+                message = f"{newest_event}\nTime: {local_timestamp}\nCluster FQDN: {EI_FQDN}\n"
+
+                if cluster_nodes:
+                    message += f"\nCurrent Cluster Nodes: {cluster_nodes}"
+                    message = check_cluster_nodes(cluster_nodes, message)
+
+                # Send alert email
+                send_email(subject, message)
+
+                # **Exit after processing the first found event**
+                return newest_event
+            logging.info("No new event found in the newest two log files.")
+            return last_processed_event
+
+        except FileNotFoundError as e:
+            logging.error(f"Log file not found: {log_file}. Error: {e}")
+        except Exception as e:
+            logging.error(f"Error processing log file: {e}")
+
+    # If no new event is found in both files, return the last processed event
+    logging.info("No new event found in the newest two log files.")
+    return last_processed_event
+
+
+
+
 
 
 # Helper function to get sorted log files and return full paths
@@ -516,10 +647,13 @@ if __name__ == '__main__':
         log_files = get_sorted_log_files(log_dir)
 
         if log_files:
+            # Ensure we are processing the newest two log files
+            last_processed_event = process_newest_two_log_files(log_files, last_processed_event)
+
             # Ensure we are processing only the newest log file
-            newest_log_file = log_files[0]
-            logging.info(f'Newest log file: {newest_log_file}')
-            last_processed_event = process_newest_log_file(newest_log_file, last_processed_event)
+            #newest_log_file = log_files[0]
+            #logging.info(f'Newest log file: {newest_log_file}')
+            #last_processed_event = process_newest_log_file(newest_log_file, last_processed_event)
 
             # Save the last processed event to the file
             save_last_processed_event(last_processed_event, last_processed_event_file)
