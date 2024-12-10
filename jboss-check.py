@@ -95,7 +95,7 @@ def get_token():
     params = {"user": EI_USER, "password": EI_PASSWORD}
 
     try:
-        response = requests.get(auth_url, params=params, verify=True)
+        response = requests.get(auth_url, params=params, verify=False)
         response.raise_for_status()
         TOKEN = response.text.split('CDATA[')[1].split(']]')[0]
         print("Token acquired successfully.")
@@ -118,7 +118,7 @@ def release_token():
     headers = {"Authorization": f"Bearer {TOKEN}"}
 
     try:
-        response = requests.get(auth_url, headers=headers, verify=True)
+        response = requests.get(auth_url, headers=headers, verify=False)
         response.raise_for_status()
         print("Token released successfully.")
         return True  # Indicate successful token release
@@ -159,7 +159,7 @@ def call_cluster_api():
     cluster_url = f"https://{EI_FQDN}/ris/web/v2/queues/availableNodes"
 
     try:
-        response = requests.get(cluster_url, headers=headers, verify=True)
+        response = requests.get(cluster_url, headers=headers, verify=False)
         response.raise_for_status()
         print("API call successful.")
         print(response.text)
